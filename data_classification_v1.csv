@@ -1,0 +1,36 @@
+name;classification;sub-classification;direction 
+global_index_score_2019;Others ;;
+index_to_be_defined;1;a;-1
+inverse_global_index_2019;3;a;-1
+population_2019;5;a;-1
+mjc_criteria_sdr_mild_version;1;0;1
+mjc_criteria_sdr_medium_version;2;0;1
+mjc_criteria_sdr_heavy_version;3;0;1
+mjc_criteria_sdr_ponderated;4;0;1
+mjc_criteria_equality;5;0;1
+mjc_criteria_capacity;6;0;1
+mjc_criteria_historical_responsability;7;0;1
+mjc_criteria_present_responsability;8;0;1
+mjc_criteria_ponderated;9;0;1
+poverty_ratio_320;2;a;1
+gdp_per_capita_ppp_2017;6;a;1
+cum_emissions_per_capita_1994_2017;7;a;-1
+emissions_per_cap_2017;8;a;-1
+undernourishment_prevalence;Others ;a;1
+stunting_prevalence_under_5_yrs;Others ;b;1
+wasting_prevalence_in_children_under_5;Others ;c;1
+maternal_mortality_rate_per_100k_births;Others ;d;1
+neonatal_mortality_rate_1k_births;Others ;e;1
+under_5_mortality_rate_1k_births;Others ;f;1
+life_expec_at_birth_yrs;Others ;g;-1
+univ_health_coverage_index;Others ;h;-1
+net_primary_enrolment_rate;Others ;i;-1
+lower_secondary_completion_rate;Others ;j;-1
+literacy_rate_15_24_yrs_both_sexes;Others ;k;-1
+ratio_female_to_male_labour_force_rate;Others ;l;-1
+population_rate_using_basic_drinking_water_services;Others ;m;-1
+population_rate_using_basic_sanitation_services;Others ;n;-1
+access_to_electricity_pop_rate;Others ;o;-1
+access_to_clean_fuels_and_tech_for_cooking_rate;Others ;p;-1
+unemployment_rate;Others ;q;1
+population_using_the_internet;Others ;r;-1
