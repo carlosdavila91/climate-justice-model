@@ -26,13 +26,24 @@ summarise_statistics <- function(df, probs_to_cap = c(.025, .975), capped = FALS
   if(capped){
     summary_2 <- df %>% 
       filter(!is.na(value)) %>% 
-      group_by(short_name, name) %>% 
+      group_by(short_name) %>% 
       summarise(
         mean = mean(value),
         skewness = moments::skewness(value),
         kurtosis = moments::kurtosis(value),
-        lower_bound = ifelse(direction > 0, min(value), max(value)),
-        lower_bound = ifelse(direction < 0, max(value), min(value))
+        minimum_value = min(value),
+        maximum_value = max(value),
+        direction = last(direction)
+      ) %>% 
+      mutate(
+        lower_bound = case_when(
+          direction > 0 ~ min,
+          direction < 0 ~ max
+        ),
+        upper_bound = case_when(
+          direction > 0 ~ max,
+          direction < 0 ~ min
+        )
       )
   } else {
     summary_2 <- df %>% 
@@ -90,15 +101,17 @@ missing_countries_by_indicator <- function(df){
   )
 }
 
-cap_data <- function(df, deleting = TRUE){
+cap_data <- function(df, 
+                     probs_to_cap = c(.025, .975), 
+                     deleting = TRUE){
   
   if (deleting) {
     imputed_df <- df %>% 
       filter(!is.na(value)) %>%
       group_by(short_name) %>% 
       mutate(
-        lower_bound = quantile(value, percent_to_cap_data[1])[[1]],
-        upper_bound = quantile(value, percent_to_cap_data[2])[[1]]
+        lower_bound = quantile(value, probs_to_cap[1])[[1]],
+        upper_bound = quantile(value, probs_to_cap[2])[[1]]
       ) %>%
       filter(value > lower_bound, value < upper_bound) %>% 
       select(-lower_bound, -upper_bound) %>% as.data.table
@@ -106,8 +119,8 @@ cap_data <- function(df, deleting = TRUE){
     imputed_df <- df %>% 
       group_by(short_name) %>% 
       mutate(
-        lower_bound = quantile(value, percent_to_cap_data[1], na.rm = T)[[1]],
-        upper_bound = quantile(value, percent_to_cap_data[2], na.rm = T)[[1]]
+        lower_bound = quantile(value, probs_to_cap[1], na.rm = T)[[1]],
+        upper_bound = quantile(value, probs_to_cap[2], na.rm = T)[[1]]
       ) %>% 
       mutate(
         value = case_when(
@@ -121,13 +134,18 @@ cap_data <- function(df, deleting = TRUE){
   return(imputed_df)  
 }
 
-min_max_normalization <- function(x){
-  return(100*(x - min(x, na.rm = T))/(max(x, na.rm = T) - min(x, na.rm = T)))
+min_max_normalization <- function(x, inverted = FALSE){
+  if(!inverted){
+    result <- 100*(x - min(x, na.rm = T))/(max(x, na.rm = T) - min(x, na.rm = T))
+  } else {
+    result <- 100*(x - max(x, na.rm = T))/(min(x, na.rm = T) - max(x, na.rm = T))
+  }
+  return(result)
 }
 
 my_fn <- function(data, mapping, ...){
   p <- ggplot(data = data, mapping = mapping) + 
-    geom_point() + 
+    geom_point(alpha = .5) + 
     geom_smooth(method=loess, fill="red", color="red", ...) +
     geom_smooth(method=lm, fill="blue", color="blue", ...)
   p

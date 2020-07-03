@@ -22,7 +22,7 @@ source("tools.R")
 ## Load data
 
 ```{r message=FALSE}
-mjc_prepared <- read_csv("mjc_prepared.csv", trim_ws = TRUE)
+mjc_prepared <- readRDS("data/mjc_prepared.rds")
 mjc_prepared %>% head %>% paged_table
 ```
 
@@ -31,12 +31,22 @@ mjc_prepared %>% head %>% paged_table
 ```{r}
 input_regexp <- "MJC" # regular expression to filter data
 
-mjc_analysis <- mjc_prepared %>% 
+mjc_analysis_long <- mjc_prepared %>% 
   filter(str_detect(short_name, input_regexp)) %>% 
   arrange(short_name)
+
+mjc_analysis_wide <- mjc_prepared %>% 
+  select(-short_name, -direction) %>%
+  pivot_wider(names_from = names, values_from = value) %>%
+  select(country, matches(input_regexp))
 ```
 
 ## Correlation Matrix
+
+```{r}
+cor.test(mjc_analysis_wide[], my_data$mpg, method = "pearson")
+```
+
 
 ```{r warning=FALSE}
 mjc_analysis %>% 

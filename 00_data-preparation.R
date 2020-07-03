@@ -6,20 +6,20 @@ library(data.table)
 # Load data ---------------------------------------------------------------
 
 # Load raw data
-mjc <- read_csv("2019_global_development_index_v4.csv", 
+mjc <- read_csv("data/2019_global_development_index_v5.csv", 
                 trim_ws = TRUE, skip_empty_rows = TRUE) %>% 
   filter(!is.na(country))
-mjc %>% head
+# mjc %>% View
 mjc %>% names
 
 # Load data classification
-data_classification <- read_csv2("data_classification_v1.csv", trim_ws = TRUE) %>% 
+data_classification <- read_csv2("data/data_classification_v2.csv", trim_ws = TRUE) %>% 
   as.data.table
-data_classification %>% head
 
 # Data preparation --------------------------------------------------------
 
-# Treat data classification
+# Treat data classification -----------------------------------------------
+
 # - Rename columns
 (old <- data_classification %>% names)
 new <- c("name", "classification", "sub_classification", "direction")
@@ -44,7 +44,15 @@ data_classification[,`:=`(
 )]
 
 
-# Join datasets
+# Correct directions
+data_classification[name == "global_index_score_2019", direction := -1]
+data_classification[name == "inverse_global_index_2019", direction := 1]
+data_classification[name == "index_to_be_defined", direction := 1]
+data_classification[name == "population_2019", direction := 1]
+data_classification[name == "gdp_per_capita_ppp_2017", direction := -1]
+
+# Join datasets -----------------------------------------------------------
+
 # - pivot from wide to long format
 # - join each criteria, index and variable with its classification
 mjc_pivoted <- mjc %>% 
@@ -54,9 +62,11 @@ mjc_pivoted <- mjc %>%
   ), by = "name") %>% 
   select(country, id, un_region_name, short_name, name, value, direction)
 
+mjc_pivoted %>% 
+  group_by(short_name) %>% 
+  distinct(name) # %>% View
 
-# Reorder
 
 # Save clean data ---------------------------------------------------------
 
-write_csv(mjc_pivoted, "mjc_prepared.csv")
+saveRDS(mjc_pivoted, "data/mjc_prepared.rds")
