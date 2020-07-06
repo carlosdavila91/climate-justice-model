@@ -1,9 +1,10 @@
 ---
 title: "Cross-correlation Analysis"
+author: Carlos Dávila Luelmo
 output: html_document
 ---
 
-```{r warning=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE, echo=FALSE}
 # Work Space preparation
 library(tidyverse)
 library(data.table)
@@ -36,24 +37,25 @@ mjc_analysis_long <- mjc_prepared %>%
   arrange(short_name)
 
 mjc_analysis_wide <- mjc_prepared %>% 
-  select(-short_name, -direction) %>%
-  pivot_wider(names_from = names, values_from = value) %>%
-  select(country, matches(input_regexp))
+  filter(str_detect(short_name, input_regexp)) %>% 
+  select(-name, -direction) %>% 
+  pivot_wider(c("country", "id", "un_region_name"), names_from = short_name, values_from = value)
 ```
 
 ## Correlation Matrix
 
+### Normality testing
+
 ```{r}
-cor.test(mjc_analysis_wide[], my_data$mpg, method = "pearson")
+mjc_shapiro <- map(mjc_analysis_wide[4:12], shapiro.test)
+str(mjc_shapiro)
 ```
 
 
 ```{r warning=FALSE}
-mjc_analysis %>% 
-  select(country, short_name, value) %>%
-  pivot_wider(names_from = short_name, values_from = value) %>%
+mjc_analysis_wide %>% 
   select(matches(input_regexp)) %>%
-  GGally::ggpairs(lower = list(continuous = my_fn)) +
+  ggpairs(lower = list(continuous = my_fn)) +
   theme(axis.text.x = element_text(size = 8))
 ```
 
@@ -80,24 +82,22 @@ We have already gone through some of them (1, 2, 4, 6, 9) but not in the correct
 ```{r}
 input_regexp <- "\\d\\w{1}|MJC9" # regular expression to filter data
 
-mjc_analysis <- mjc_prepared %>% 
+mjc_analysis_long <- mjc_prepared %>% 
   filter(str_detect(short_name, input_regexp)) %>% 
   arrange(short_name)
 ```
 
 ```{r warning=FALSE}
-mjc_analysis %>% 
-  select(country, short_name, value) %>%
-  pivot_wider(names_from = short_name, values_from = value) %>%
-  select(matches(input_regexp)) %>%
-  GGally::ggpairs(lower = list(continuous = my_fn)) +
+mjc_analysis_wide %>% 
+  select(matches(input_regexp)) %>% 
+  ggpairs(lower = list(continuous = my_fn)) +
   theme(axis.text.x = element_text(size = 8))
 ```
 
 ### Imputation of missing data
 
 ```{r}
-mjc_analysis %>% 
+mjc_analysis_long %>% 
   summarise_statistics(capped = FALSE) %>% 
   select(short_name, name, number_of_observations, missing_data_pctg) %>% 
   paged_table
@@ -164,7 +164,7 @@ How the outcome can change depending on which choices we make during the modelli
 
 > **De-constructing composite indicators can help extend the analysis**
 
-![](back.png)
+![](image/back.png)
 
 ### Links to other variables
 
