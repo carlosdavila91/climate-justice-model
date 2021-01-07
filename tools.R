@@ -1,32 +1,30 @@
 
-summarise_statistics <- function(df, probs_to_cap = c(.025, .975), capped = FALSE) {
+summarise_statistics <- function(df, probs = c(.025, .975), capped = FALSE) {
   
-  if (!capped) {
-    summary_1 <- df %>% 
-      group_by(short_name, name) %>% 
-      summarise(
+  summary_1 <- df %>% 
+    group_by(short_name, name) %>% 
+    {if(!capped){
+      summarise(.,
         number_of_observations = n() - sum(is.na(value)),
         missing_data_pctg = 100*round(sum(is.na(value))/n(), 4)
       )
-  } else {
-    summary_1 <- df %>% 
-      group_by(short_name, name) %>% 
-      summarise(
+    } else {
+      summarise(.,
         number_of_observations = n()
       )
-
+    }}
+  
     n_obs <- max(summary_1$number_of_observations)
     
     summary_1 <- summary_1 %>% 
       mutate(
         missing_data_pctg = 100 * round(1 - (number_of_observations / n_obs), 4)
       )
-  }
   
   if(capped){
     summary_2 <- df %>% 
       filter(!is.na(value)) %>% 
-      group_by(short_name) %>% 
+      group_by(short_name, name) %>% 
       summarise(
         mean = mean(value),
         skewness = moments::skewness(value),
@@ -57,11 +55,11 @@ summarise_statistics <- function(df, probs_to_cap = c(.025, .975), capped = FALS
         maximum_value = max(value),
         direction = last(direction),
         lower_bound = ifelse(direction > 0, 
-                             quantile(value, probs_to_cap[1])[[1]], 
-                             quantile(value, probs_to_cap[2])[[1]]),
+                             quantile(value, probs[1])[[1]], 
+                             quantile(value, probs[2])[[1]]),
         upper_bound = ifelse(direction < 0, 
-                             quantile(value, probs_to_cap[1])[[1]], 
-                             quantile(value, probs_to_cap[2])[[1]])
+                             quantile(value, probs[1])[[1]], 
+                             quantile(value, probs[2])[[1]])
       )
   }
   
@@ -102,36 +100,28 @@ missing_countries_by_indicator <- function(df){
 }
 
 cap_data <- function(df, 
-                     probs_to_cap = c(.025, .975), 
+                     probs = c(.025, .975), 
                      deleting = TRUE){
   
-  if (deleting) {
-    imputed_df <- df %>% 
-      filter(!is.na(value)) %>%
+    df %>% 
+      {if(deleting) filter(., !is.na(value)) else .} %>% 
       group_by(short_name) %>% 
       mutate(
-        lower_bound = quantile(value, probs_to_cap[1])[[1]],
-        upper_bound = quantile(value, probs_to_cap[2])[[1]]
-      ) %>%
-      filter(value > lower_bound, value < upper_bound) %>% 
-      select(-lower_bound, -upper_bound) %>% as.data.table
-  } else {
-    imputed_df <- df %>% 
-      group_by(short_name) %>% 
-      mutate(
-        lower_bound = quantile(value, probs_to_cap[1], na.rm = T)[[1]],
-        upper_bound = quantile(value, probs_to_cap[2], na.rm = T)[[1]]
+        lower_bound = quantile(value, probs[1], na.rm = T)[[1]],
+        upper_bound = quantile(value, probs[2], na.rm = T)[[1]]
       ) %>% 
-      mutate(
-        value = case_when(
-          value < lower_bound ~ lower_bound,
-          value > upper_bound ~ upper_bound,
-          TRUE ~ value
-        )
-      )
-  }
-  
-  return(imputed_df)  
+      {if(deleting){
+        filter(., value > lower_bound, value < upper_bound) %>% 
+          select(-lower_bound, -upper_bound)
+      } else {
+        mutate(.,
+               value = case_when(
+                 value < lower_bound ~ lower_bound,
+                 value > upper_bound ~ upper_bound,
+                 TRUE ~ value
+               ))
+      }
+      }
 }
 
 min_max_normalization <- function(x, inverted = FALSE){
@@ -143,10 +133,34 @@ min_max_normalization <- function(x, inverted = FALSE){
   return(result)
 }
 
-my_fn <- function(data, mapping, ...){
+my_fn <- function(data, mapping, reg_lines = FALSE, ...){
   p <- ggplot(data = data, mapping = mapping) + 
-    geom_point(alpha = .5) + 
-    geom_smooth(method=loess, fill="red", color="red", ...) +
-    geom_smooth(method=lm, fill="blue", color="blue", ...)
-  p
+    geom_point(alpha = .5, size = .5)
+  
+  if(reg_lines){
+    p + 
+      geom_smooth(method=loess, fill="red", color="red", ...) +
+      geom_smooth(method=lm, fill="blue", color="blue", ...)
+  } else {
+    p
+  }
+}
+
+round_df <- function(x, digits) {
+  numeric_columns <- map_chr(x, is.numeric) %>% unname %>% as.logical
+  x[numeric_columns] <-  round(x[numeric_columns], digits)
+  x
+}
+
+
+ensanchar_indicadores <- function(indicadores_long, id_column){
+  indicadores_long %>% 
+    select({{ id_column }}, short_name, value) %>% 
+    arrange({{ id_column }}, short_name, value) %>% 
+    pivot_wider(names_from = short_name, values_from = value)
+}
+
+alargar_indicadores <- function(indicadores_wide){
+  indicadores_wide %>% 
+    pivot_longer(-country, names_to = "short_name", values_to = "value")
 }
