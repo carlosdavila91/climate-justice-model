@@ -1,0 +1,43 @@
+---
+title: "Análisis Multivariante"
+subtitle: "Análisis Factorial"
+author: "Carlos Dávila Luelmo, Cindy Ramírez Padilla"
+date: "`r format(Sys.Date(), '%d de %b de %Y')`"
+output: 
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, warning=F, error=FALSE, message=FALSE}
+library(tidyverse)
+library(corrplot)
+library(GGally)
+library(psych)
+
+source("tools.R")
+
+theme_set(theme_bw())
+```
+
+Carga de datos.
+
+```{r carga-indicadores}
+indicadores_long <- readRDS("data/mjc_full_set_prepared.rds") %>% filter(!str_detect(short_name, "MJC"))
+indicadores_wide <- readRDS("data/indicadores_matriz.rds") %>% select(-starts_with("MJC"))
+```
+
+# Análisis Factorial
+
+```{r matriz-correlaciones}
+cor_matrix_spearman <- cor(indicadores_matriz, indicadores_matriz, 
+                           "pairwise.complete.obs", "spearman")
+
+cor_matrix_spearman <- cor_matrix_spearman %>% as.matrix
+```
+

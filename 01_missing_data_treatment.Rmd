@@ -1,0 +1,257 @@
+---
+title: "Imputación de valores faltantes"
+author: "Carlos Dávila Luelmo, Cindy Ramírez Padilla"
+date: "`r format(Sys.Date(), '%d de %b de %Y')`"
+output: 
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+options(dplyr.summarise.inform = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r librerias, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(data.table)
+
+source("tools.R")
+```
+
+# Valores faltantes en los datos
+
+```{r}
+indicadores_long <- readRDS("data/mjc_full_set_prepared.rds")
+indicadores_wide <- indicadores_long %>% ensanchar_indicadores
+```
+
+## ¿Por qué faltan valores en los datos?
+
+```{r conteo-vvff-pais}
+vvff_pais <- indicadores_wide %>% mutate(row_na = rowSums(is.na(.))) %>% select(country, row_na)
+```
+
+Dos supuestos:
+
+- (NMAR) Los valores faltantes dependen del país del que se trate. Consideramos que los valores no faltan aleatoriamente cuando el país no reporta datos sistemáticamente, 
+- (MAR) Faltan datos aleatoriamente cuando faltan pocos datos para un mismo país.
+
+Propuesta:
+
++ Eliminar países con mayor cantidad de valores faltantes (por ejemplo > 4 ó 5 - se puede medir el impacto de esta decisión en el análisis de robustez y sensibilidad).
++ Computar valores faltantes a países con pocos valores faltantes
+
+```{r eliminar-paises}
+(paises_eliminados <- vvff_pais %>% filter(row_na > 3))
+indicadores_long <- indicadores_long %>% 
+  filter(!country %in% paises_eliminados$country)
+```
+
+## Elección del método
+
+Se elige un método para cada variable. La elección del método dependerá de lo siguiente.
+
+* Tipo de variables: el método se debe ajustar al tipo de variable del que se trata. En este caso son todas contínuas.
+* Proporción de valores faltantes respecto al total de casos. A mayor porcentaje, más sofisticado tendrá que ser el método elegido.
+
+```{r proporcion-mising-data}
+(
+  analisis_vvff <- 
+    indicadores_long %>% 
+    group_by(short_name, name) %>% 
+    summarise(observaciones = n(),
+              vvff = sum(is.na(value)),
+              prop_vvff = round(vvff / observaciones, 4))
+)
+```
+
+Elegimos varios métodos para luego comprobar la eficacia de cada uno de ellos para cada variable independientemente de la cantidad de valores faltantes que tenga.
+
+* Media incondicional 
+* Imputación por bosque aleatorio o por maximización de la expectación.
+
+
+## Comprobación de la bondad de ajuste de los métodos
+
+Tomamos el conjunto de datos que está completo, elminamos una parte de los datos proporcional a los valores que faltan, probamos los métodos de imputación y comprobamos su bondad de ajuste estudiando los siguientes parámetros.
+
+(ecuaciones en la página 62)
+
+* El coeficiente de determinación (R$^2$).
+* La raíz de la suma de los errores cuadrados (RMSE)
+* El error absoluto medio (MAE)
+
+Separo el subconjunto de datos sin valores faltantes, sacando a todos los países que tengan al menos 1 valor faltante.
+
+```{r indicadores-sin-vf}
+paises_con_vvff <- indicadores_long %>% 
+  group_by(country) %>% 
+  summarise(algun_vf = any(is.na(value))) %>% 
+  filter(algun_vf) %>% 
+  pull(country)
+
+indicadores_sin_vvff <- 
+  indicadores_long %>% 
+  filter(!country %in% paises_con_vvff) %>% 
+  arrange(country, short_name, value)
+```
+
+Se elimina un total de `r length(paises_con_vvff)` países del conjunto de datos.
+
+Genero índices aleatorios para eliminar casos en cada variable en función del número total de observaciones y el porcentaje de valores faltantes en cada caso.
+
+```{r indices-eliminatorios}
+set.seed(0)
+indices_eliminatorios <- indicadores_sin_vvff %>% 
+  group_by(short_name) %>% 
+  summarise(n = n()) %>% 
+  left_join(analisis_vvff %>% select(short_name, prop_vvff)) %>% 
+  mutate(registros_a_eliminar = round(prop_vvff * n))%>% 
+  mutate(indices_aleatorios = map2(n, registros_a_eliminar, ~sample.int(.x, size = .y))) %>%
+  select(short_name, indices_aleatorios)
+```
+
+Elimino datos aleatoriamente en proporción a los valores faltantes de cada variable en el conjunto original.
+
+```{r eliminacion-datos}
+indicadores_prueba_imputacion <- indicadores_sin_vvff %>% 
+  arrange(country, short_name, value) %>% 
+  group_by(short_name) %>% 
+  mutate(indice_indicador_pais = row_number()) %>% 
+  left_join(indices_eliminatorios) %>% 
+  mutate(value = case_when(
+    indice_indicador_pais %in% flatten(indices_aleatorios) ~ NA_real_,
+    TRUE                                                   ~ value
+  )) %>% 
+  select(-c(indice_indicador_pais, indices_aleatorios))
+```
+
+Imputo los valores con media incondicional para cada variable (independientemente de la complejidad).
+
+```{r imputacion-media-subconjunto-sintético, message=F, warning=F}
+imputacion_media <- indicadores_prueba_imputacion %>% 
+  arrange(country, short_name, value) %>% 
+  group_by(short_name) %>% 
+  mutate(value = case_when(
+    is.na(value) ~ mean(value, na.rm = T),
+    TRUE         ~ value
+  ))
+```
+
+
+Imputo los valores con Bosque Aleatorio.
+
+```{r imputacion-bosque-aleatorio}
+library(missForest, warn.conflicts = F)
+
+imputacion_bosque <- missForest(
+  indicadores_prueba_imputacion %>%
+  select(country, short_name, value) %>% 
+  arrange(country, short_name, value) %>% 
+  pivot_wider(names_from = short_name, values_from = value) %>% 
+    select(-country) %>% 
+    as.matrix
+)
+
+imputacion_bosque_df <- indicadores_prueba_imputacion %>% 
+  arrange(country, short_name, value) %>% 
+  ensanchar_indicadores %>% 
+  select(country) %>% 
+  bind_cols(imputacion_bosque$ximp %>% as_tibble) %>% 
+  pivot_longer(-country, names_to = "short_name", values_to = "value")
+```
+
+Imputo los valores con algoritmo de Maximización de la Expectación.
+
+Consultar: https://www.sciencedirect.com/science/article/abs/pii/S0169743901001319
+
+```{r expectation-maximization}
+library(mvdalab)
+
+imputacion_max_exp <- imputeEM(
+  indicadores_prueba_imputacion %>% 
+    arrange(country, short_name, value) %>%  
+    ensanchar_indicadores %>% 
+    select(-country)
+)
+
+imputacion_max_exp_df <- indicadores_prueba_imputacion %>% 
+  arrange(country, short_name, value) %>% 
+  ensanchar_indicadores %>% 
+  select(country) %>% 
+  bind_cols(imputacion_max_exp$Imputed.DataFrames[[2]])
+
+variables <- names(indicadores_prueba_imputacion %>% ensanchar_indicadores)
+names(imputacion_max_exp_df) <- variables
+
+imputacion_max_exp_df <- imputacion_max_exp_df %>% alargar_indicadores()
+```
+
+# Comparativa de resultados de las imputaciones
+
+**TO-DO: Comparar resultados de las imputaciones para decidir el más óptimo para cada variable.**
+
+Calculamos las métricas para cada imputación.
+
++ Coeficiente de determinación ($R^2$)
+
+```{r r-squared}
+rsq <- function (obs, pred) cor(obs, pred, method = "spearman")^2
+
+compare_imputations <- function(obs_long_format, preds_long_format, FUN = rsq, value_name = "rsq_media"){
+  map2_dfr(obs_long_format %>% ensanchar_indicadores() %>% select(-country), 
+           preds_long_format %>% ensanchar_indicadores() %>% select(-country), 
+           FUN) %>% 
+    pivot_longer(names(.), names_to = "short_name", values_to = value_name)
+}
+
+compare_imputations(indicadores_sin_vvff, imputacion_media) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_bosque_df, value_name = "rsq_bosque")) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_max_exp_df, value_name = "rsq_max_exp"))
+
+compare_imputations(indicadores_sin_vvff, imputacion_media) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_bosque_df, value_name = "rsq_bosque")) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_max_exp_df, value_name = "rsq_max_exp")) %>% 
+  filter(rsq_media != 1) %>% 
+  summarise(across(contains("rsq_"), ~sum(.x)))
+```
+
++ Error cuadrático medio (RMSE)
+
+```{r rmse}
+rmse <- function(obs, preds) {
+  (1 / length(obs) * sum(preds - obs)^2)^(1/2)
+}
+
+compare_imputations(indicadores_sin_vvff, imputacion_media, FUN = rmse, value_name = "rmse_media") %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_bosque_df, FUN = rmse, value_name = "rmse_bosque")) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_max_exp_df, FUN = rmse, value_name = "rmse_max_exp"))
+
+compare_imputations(indicadores_sin_vvff, imputacion_media, FUN = rmse, value_name = "rmse_media") %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_bosque_df, FUN = rmse, value_name = "rmse_bosque")) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_max_exp_df, FUN = rmse, value_name = "rmse_max_exp")) %>% 
+  filter(rmse_media != 1) %>% 
+  summarise(across(contains("rmse_"), ~sum(.x)))
+```
+
++ Error absoluto medio (MAE)
+
+```{r mae}
+mae <- function(obs, preds) {
+  1 / length(obs) * sum(abs(preds - obs))
+}
+
+compare_imputations(indicadores_sin_vvff, imputacion_media, FUN = mae, value_name = "mae_media") %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_bosque_df, FUN = mae, value_name = "mae_bosque")) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_max_exp_df, FUN = mae, value_name = "mae_max_exp"))
+
+compare_imputations(indicadores_sin_vvff, imputacion_media, FUN = mae, value_name = "mae_media") %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_bosque_df, FUN = mae, value_name = "mae_bosque")) %>% 
+left_join(compare_imputations(indicadores_sin_vvff, imputacion_max_exp_df, FUN = mae, value_name = "mae_max_exp")) %>% 
+  filter(mae_media != 1) %>% 
+  summarise(across(contains("mae_"), ~sum(.x)))
+```
+

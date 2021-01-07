@@ -2,9 +2,10 @@
 .Rhistory
 .Rproj.user/
 
-2019_global_development_index_v4.csv
-data_classification.csv
-mjc_prepared.csv
+*.csv
+*.png
 
+nice_to/
+data/
 zzz
 .Rproj.user

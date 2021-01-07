@@ -1,0 +1,224 @@
+---
+title: "Análisis Multivariante"
+subtitle: "Análisis de Componentes Principales"
+author: "Carlos Dávila Luelmo, Cindy Ramírez Padilla"
+date: "`r format(Sys.Date(), '%d de %b de %Y')`"
+output: 
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r packages, warning=F, error=FALSE, message=FALSE}
+library(tidyverse)
+library(corrplot)
+library(GGally)
+
+source("tools.R")
+
+theme_set(theme_bw())
+```
+
+Carga de datos (ya tratados, sin outliers).
+
+```{r carga-indicadores}
+# TODO: cargar datos con vvff imputados
+
+indicadores_long <- readRDS("data/mjc_full_set_prepared.rds") %>% filter(!str_detect(short_name, "MJC|\\d.+?"))
+indicadores_wide <- indicadores_long %>% ensanchar_indicadores(id) %>% drop_na %>% select(-starts_with("MJC"))
+```
+
+# Análisis de Componentes Principales
+
+## Verificación de supuestos
+
+Comprobaciones según la literatura.
+
+### Suficiente número de casos
+
+```{r verificacion-supuestos, echo=F}
+cumple <- "Se cumple"
+no_cumple <- "No se cumple"
+
+desc_1 <- "There should be at least 10 cases for each variable."
+desc_2 <- "The cases-to-variables ratio should be no lower than 3."
+desc_3 <- "The cases-to-variables ratio should be no lower than 5 (Bryant & Yarnold, 1995; Nunnaly, 1978, Gorsuch, 1983)."
+desc_4 <- "The number of cases should be the larger of “5 × number of variables” and 100 (Hatcher, 1994)."
+desc_5 <- "Hutcheson & Sofroniou (1999) recommend at least 150 - 300 cases (closer to 150 when there are a few highly correlated variables)."
+desc_6 <- "There should be at least 200 cases, regardless of the cases-to-variables ratio (Gorsuch, 1983)."
+desc_7 <- "There should be 51 more cases than the number of variables, to support chi-square testing (Lawley & Maxwell, 1971)."
+
+verif_1 <- indicadores_long %>% group_by(short_name) %>% summarise(casos = sum(!is.na(value)))
+verif_2 <- nrow(indicadores_wide %>% drop_na) / ncol(indicadores_wide %>% drop_na)
+verif_4 <- 5 * ncol(indicadores_wide %>% drop_na)
+verif_7 <- nrow(indicadores_wide %>% drop_na) > ncol(indicadores_wide) + 51
+
+tribble(
+  ~Regla                ,~`Descripción`, ~verif,
+  "Rule of 10"          , desc_1       , as.character(all(verif_1$casos > 10)),
+  "3:1 ratio"           , desc_2       , as.character(verif_2 >= 3),
+  "5:1 ratio"           , desc_3       , as.character(verif_2 >= 5),
+  "Rule of 100"         , desc_4       , paste0("El número recomendado de casos es ", verif_4, ". ", no_cumple),
+  "Rule of 150"         , desc_5       , as.character(FALSE),
+  "Rule of 200"         , desc_6       , as.character(FALSE),
+  "Rule of significance", desc_7       , as.character(verif_7)
+) %>% 
+  mutate(`Verficación` = ifelse(verif == "TRUE", cumple, ifelse(verif == "FALSE", no_cumple, verif))) %>% 
+  select(-verif)
+```
+
+### No sesgo en la selección de variables
+
+Elegimos todas las que tenemos así que no.
+
+### Datos atípicos
+
+No puede haber datos atípicos en el ACP porque es un método basado en el álgebra lineal.
+
+```{r datos-atipicos}
+indicadores_long %>% 
+  ggplot(aes(value)) +
+  geom_boxplot(outlier.colour = "red") +
+  facet_wrap(. ~ short_name, scales = "free")
+```
+
+Eliminación datos atípicos.
+
++ Se sustituyen los datos atípicos por los valores de los percentiles 2,5 y 97,5.
+
+```{r eliminacion-outliers}
+indicadores_long_sin_outliers <- indicadores_long %>% 
+  cap_data(deleting = F)
+
+indicadores_long_sin_outliers %>% 
+  ggplot(aes(value)) +
+  geom_boxplot(outlier.colour = "red") +
+  facet_wrap(. ~ short_name, scales = "free")
+```
+
+Guardar datos en forma de matriz.
+
+```{r datos-matriz}
+indicadores_long_sin_outliers_df <- indicadores_long_sin_outliers %>% 
+  ensanchar_indicadores(id_column = id) %>% 
+  drop_na() %>% # realmente no necesario
+  as.data.frame()
+
+row.names(indicadores_long_sin_outliers_df) <- indicadores_long_sin_outliers_df$id
+
+indicadores_long_sin_outliers_matriz <- indicadores_long_sin_outliers_df %>%
+  select(-id) %>%
+  data.matrix
+
+saveRDS(indicadores_long_sin_outliers_matriz, "data/indicadores_long_sin_outliers_matriz.rds")
+```
+
+
+### Datos de intervalo
+
+Se pueden usar datos en forma de intervalo (e.g. rankings).
+
+### Linealidad 
+
+```{r matriz-correlaciones-linealidad}
+cor_matrix_spearman <- cor(indicadores_long_sin_outliers_matriz, 
+                           indicadores_long_sin_outliers_matriz, 
+                           "pairwise.complete.obs", "spearman")
+
+cor_matrix_spearman <- cor_matrix_spearman %>% as.matrix
+
+corrplot.mixed(cor_matrix_spearman, tl.cex = .5, tl.col = "black", addCoefasPercent = F)
+```
+
+### Normalidad multivariante
+
+```{r test-normalidad-multivariante}
+library(MVN)
+
+mvna <- mvn(indicadores_long_sin_outliers_matriz, 
+            scale = TRUE, 
+            tol = 1e-42, 
+            mvnTest = "mardia")
+
+mvna$multivariateNormality
+```
+
+# Análisis de Componentes Principales
+
+```{r acp}
+library(AMR)
+
+pca <- prcomp(indicadores_long_sin_outliers_matriz, scale = TRUE)
+
+plot(pca, type = "l")
+```
+
+Los elementos `center` y `scale` almacenados en el objeto `pca` contienen la media y desviación típica de las variables previa estandarización (en la escala original).
+
+```{r center-scale}
+pca$center %>% round(2)
+pca$scale %>% round(2)
+```
+
+`rotation` contiene el valor de los _loadings_  $\phi$ para cada componente (vector propio o _ eigenvector_).
+
+```{r rotation}
+pca$rotation
+```
+
+En los vectores de _loadings_ tenemos la combinación lineal de las componentes.
+
+```{r acp-plot}
+biplot(x = pca, cex = 0.6, col = c("blue4", "brown3"))
+biplot(x = pca, scale = 0, cex = 0.6, col = c("blue4", "brown3"))
+```
+
+Una vez calculadas las componentes principales, se puede conocer la varianza explicada por cada una de ellas, la proporción respecto al total y la proporción de varianza acumulada.
+
+```{r varianza-var-acumulada}
+pca$sdev^2
+prop_varianza <- pca$sdev^2 / sum(pca$sdev^2)
+prop_varianza
+
+ggplot(data = data.frame(prop_varianza[1:4], pc = 1:4),
+       aes(x = pc, y = prop_varianza[1:4])) +
+  geom_col(width = 0.3) +
+  scale_y_continuous(limits = c(0,1)) +
+  theme_bw() +
+  labs(x = "Componente principal",
+       y = "Prop. de varianza explicada")
+
+prop_varianza_acum <- cumsum(prop_varianza)
+prop_varianza_acum
+
+prop_varianza <- pca$sdev^2/sum(pca$sdev^2)
+prop_varianza_acum <- cumsum(prop_varianza)
+ggplot(data = data.frame(prop_varianza_acum, pc = factor(1:length(prop_varianza_acum))),
+       aes(x = pc, y = prop_varianza_acum, group = 1)) +
+  geom_point() +
+  geom_line() +
+  geom_label(aes(label = round(prop_varianza_acum,2))) +
+  theme_bw() +
+  labs(x = "Componentes principales", 
+       y = "Prop. varianza explicada acumulada")
+```
+
+
+```{r boot-pca, message=FALSE}
+# library(bootSVD)
+# library(pcaBootPlot)
+# 
+# boot_pca <- bootPCA(Y = indicadores_long_sin_outliers_matriz, K = 5, centerSamples = T)
+# 
+# biplot(x = boot_pca, scale = 0, cex = 0.6, col = c("blue4", "brown3"))
+# boot_pca
+# 
+# pcaBootPlot(indicadores_long_sin_outliers_df, log2.transform = T, confidence.regions = T, use.prcomp = T)  
+```
+
